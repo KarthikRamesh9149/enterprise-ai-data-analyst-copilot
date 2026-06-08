@@ -7,11 +7,32 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.models import Dataset, MLModel, Report
+from app.services.llm import LLMProviderError, chat_completion, openai_enabled
 
 
 def generate_report(db: Session, user_id: UUID, title: str, dataset: Dataset | None = None, agent_run_id: UUID | None = None) -> Report:
     latest_model = db.query(MLModel).order_by(MLModel.created_at.desc()).first()
-    markdown = f"""# {title}
+    if openai_enabled(settings.report_generator_provider):
+        try:
+            markdown = chat_completion(
+                system=(
+                    "Write concise executive analytics reports in Markdown. Separate Facts, "
+                    "Predictions, Recommendations, and Limitations. Do not invent unsupported facts."
+                ),
+                user=(
+                    f"Title: {title}\n"
+                    f"Dataset: {dataset.original_filename if dataset else 'not selected'}\n"
+                    f"Rows: {dataset.row_count if dataset else 'n/a'}\n"
+                    f"Quality score: {round(dataset.quality_score, 2) if dataset else 'n/a'}\n"
+                    f"Latest model metrics: {latest_model.metrics if latest_model else 'No model trained yet'}\n"
+                ),
+            )
+        except LLMProviderError:
+            markdown = ""
+    else:
+        markdown = ""
+    if not markdown:
+        markdown = f"""# {title}
 
 ## Facts
 - Dataset: {dataset.original_filename if dataset else "not selected"}.
