@@ -25,3 +25,5 @@ storage/mlflow/
 .DS_Store
 
 *.tsbuildinfo
+backend/*.egg-info/
+backend/storage/
