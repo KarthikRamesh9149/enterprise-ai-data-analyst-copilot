@@ -23,3 +23,5 @@ logs/
 backend/local.db
 storage/mlflow/
 .DS_Store
+
+*.tsbuildinfo
