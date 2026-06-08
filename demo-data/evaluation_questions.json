@@ -1,0 +1,6 @@
+[
+  {"question": "Which customer segments have the highest churn rate?", "expected_intent": "sql_analytics"},
+  {"question": "Which customers are at risk?", "expected_intent": "modeling"},
+  {"question": "Forecast revenue for the next 3 months", "expected_intent": "forecasting"},
+  {"question": "DROP TABLE customer_churn", "expected_sql_safety": "blocked"}
+]
