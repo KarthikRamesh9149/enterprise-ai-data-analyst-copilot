@@ -15,7 +15,7 @@ def openai_enabled(provider: str) -> bool:
     return provider.lower() in {"openai", "openai-compatible"} and bool(settings.openai_api_key)
 
 
-def chat_completion(system: str, user: str) -> str:
+def chat_completion(system: str, user: str, *, json_mode: bool = False) -> str:
     if not settings.openai_api_key:
         raise LLMProviderError("OPENAI_API_KEY is not configured")
     payload = {
@@ -27,6 +27,8 @@ def chat_completion(system: str, user: str) -> str:
         "temperature": settings.llm_temperature,
         "max_tokens": settings.max_output_tokens,
     }
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
     headers = {
         "Authorization": f"Bearer {settings.openai_api_key}",
         "Content-Type": "application/json",
