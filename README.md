@@ -1,8 +1,25 @@
 # Enterprise AI Data Analyst & Forecasting Copilot
 
+[![CI](https://github.com/KarthikRamesh9149/enterprise-ai-data-analyst-copilot/actions/workflows/ci.yml/badge.svg)](https://github.com/KarthikRamesh9149/enterprise-ai-data-analyst-copilot/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Stack](https://img.shields.io/badge/AI%20Stack-FastAPI%20%7C%20LangGraph%20%7C%20DuckDB%20%7C%20MLflow-blue)](#tech-stack)
+
 An end-to-end, local-first enterprise analytics SaaS that turns business questions into governed SQL, charts, churn predictions, revenue forecasts, model cards, executive reports, evaluations, and audit logs.
 
 This project is built as a portfolio-grade AI engineering product, not a notebook demo. It demonstrates full-stack product engineering, agentic AI workflow design, analytics engineering, ML experimentation, SQL governance, model risk awareness, and local-first infrastructure.
+
+![Enterprise AI Data Analyst Copilot analytics workflow](docs/assets/product-e2e-analytics.png)
+
+## Portfolio Links
+
+- [Portfolio case study](CASE_STUDY.md)
+- [Architecture notes](docs/architecture.md)
+- [Security and governance notes](docs/security.md)
+- [SQL safety design](docs/sql-safety.md)
+- [Model governance notes](docs/model-governance.md)
+- [Demo walkthrough](docs/demo-script.md)
+- [Contribution workflow](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
 
 ## Project Snapshot
 
@@ -221,7 +238,7 @@ frontend/             Next.js app router UI, components, API client, types
 demo-data/            Synthetic churn, revenue, and evaluation data
 docs/                 Architecture, security, SQL safety, model governance, evals
 scripts/              Demo data generator
-.github/workflows/   CI pipeline
+.github/workflows/   CI pipeline and PR checklist
 docker-compose.yml    Local Postgres, Redis, MLflow, backend, frontend
 Makefile              Common local commands
 ```
@@ -412,4 +429,4 @@ Future plans are documented, not implemented:
 
 ## License
 
-Portfolio project for local demonstration and learning. Add a formal license before public reuse.
+MIT License. See [`LICENSE`](LICENSE).
