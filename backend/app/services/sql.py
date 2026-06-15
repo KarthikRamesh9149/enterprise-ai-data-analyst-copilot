@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import dataclass
+from typing import cast
 
 import duckdb
 import pandas as pd
@@ -113,7 +114,7 @@ def validate_sql(sql: str, dataset: Dataset, allowed_columns: set[str] | None = 
         if len(parsed_statements) != 1:
             findings.append("Exactly one SQL statement is allowed")
         elif parsed_statements:
-            parsed = parsed_statements[0]
+            parsed = cast(exp.Expression, parsed_statements[0])
     except ParseError as exc:
         findings.append(f"SQL parser rejected query: {exc.errors[0].get('description', str(exc)) if exc.errors else str(exc)}")
     tokens = set(re.findall(r"[a-zA-Z_][a-zA-Z0-9_]*", stripped.lower()))
