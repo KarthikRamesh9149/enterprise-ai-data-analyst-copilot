@@ -3,10 +3,14 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import dataclass
+from typing import cast
 
 import duckdb
 import pandas as pd
 from sqlalchemy.orm import Session
+from sqlglot import expressions as exp
+from sqlglot import parse
+from sqlglot.errors import ParseError
 
 from app.core.config import settings
 from app.db.models import Chart, Dataset, GeneratedSQLQuery, SQLExecutionResult
@@ -36,6 +40,12 @@ class SafetyResult:
     status: str
     findings: list[str]
     validated_sql: str | None
+
+
+class SQLSafetyError(ValueError):
+    def __init__(self, findings: list[str]) -> None:
+        super().__init__("SQL failed safety validation")
+        self.findings = findings
 
 
 def classify_intent(question: str) -> str:
@@ -98,15 +108,32 @@ def validate_sql(sql: str, dataset: Dataset, allowed_columns: set[str] | None = 
     findings: list[str] = []
     if ";" in stripped:
         findings.append("Multiple SQL statements are blocked")
+    parsed: exp.Expression | None = None
+    try:
+        parsed_statements = parse(stripped, read="duckdb")
+        if len(parsed_statements) != 1:
+            findings.append("Exactly one SQL statement is allowed")
+        elif parsed_statements:
+            parsed = cast(exp.Expression, parsed_statements[0])
+    except ParseError as exc:
+        findings.append(f"SQL parser rejected query: {exc.errors[0].get('description', str(exc)) if exc.errors else str(exc)}")
     tokens = set(re.findall(r"[a-zA-Z_][a-zA-Z0-9_]*", stripped.lower()))
     blocked_tokens = sorted(tokens & BLOCKED)
     if blocked_tokens:
         findings.append(f"Blocked SQL tokens: {', '.join(blocked_tokens)}")
-    if not re.match(r"^\s*(select|with)\b", stripped, re.IGNORECASE | re.DOTALL):
+    if parsed is not None and not isinstance(parsed, exp.Select):
         findings.append("Only SELECT or WITH queries are allowed")
-    if table not in stripped:
+    elif parsed is None and not re.match(r"^\s*(select|with)\b", stripped, re.IGNORECASE | re.DOTALL):
+        findings.append("Only SELECT or WITH queries are allowed")
+    if parsed is not None:
+        table_names = {table_expr.name for table_expr in parsed.find_all(exp.Table)}
+        if table not in table_names:
+            findings.append("SQL must reference the selected dataset table")
+    elif table not in stripped:
         findings.append("SQL must reference the selected dataset table")
-    selected_all = bool(re.search(r"\bselect\s+(\*|[a-zA-Z_][a-zA-Z0-9_]*\.\*)", stripped, re.IGNORECASE))
+    selected_all = bool(parsed and list(parsed.find_all(exp.Star))) or bool(
+        re.search(r"\bselect\s+(\*|[a-zA-Z_][a-zA-Z0-9_]*\.\*)", stripped, re.IGNORECASE)
+    )
     sensitive_in_schema = sorted(
         [
             c
@@ -119,65 +146,50 @@ def validate_sql(sql: str, dataset: Dataset, allowed_columns: set[str] | None = 
     if any(pattern in token for token in tokens for pattern in SENSITIVE_PATTERNS):
         findings.append("Sensitive columns require explicit governance review and are blocked in analytics SQL")
     if allowed_columns:
-        aliases = {a.lower() for a in re.findall(r"\bas\s+([a-zA-Z_][a-zA-Z0-9_]*)", stripped, re.IGNORECASE)}
-        cte_names = {
-            c.lower()
-            for c in re.findall(
-                r"(?:with|,)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+as\s*\(",
-                stripped,
-                re.IGNORECASE,
+        allowed_lower = {c.lower() for c in allowed_columns}
+        if parsed is not None:
+            aliases = {alias.alias.lower() for alias in parsed.find_all(exp.Alias) if alias.alias}
+            columns = {column.name.lower() for column in parsed.find_all(exp.Column)}
+            unknown = sorted([column for column in columns if column not in allowed_lower and column not in aliases])
+            if unknown:
+                findings.append(f"Unknown columns or identifiers: {', '.join(unknown[:8])}")
+        else:
+            aliases = {a.lower() for a in re.findall(r"\bas\s+([a-zA-Z_][a-zA-Z0-9_]*)", stripped, re.IGNORECASE)}
+            cte_names = {
+                c.lower()
+                for c in re.findall(
+                    r"(?:with|,)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+as\s*\(",
+                    stripped,
+                    re.IGNORECASE,
+                )
+            }
+            safe_words = {
+                "select", "from", "where", "group", "by", "order", "limit", "as", "avg", "sum", "count",
+                "min", "max", "cast", "double", "int", "integer", "float", "decimal", "nullif", "coalesce",
+                "case", "when", "then", "else", "end", "true", "false", "desc", "asc", "and", "or", "with",
+            }
+            identifiers = tokens - BLOCKED - safe_words - aliases - cte_names
+            unknown = sorted(
+                [i for i in identifiers if i != table.lower() and i not in {c.lower() for c in allowed_columns}]
             )
-        }
-        safe_words = {
-            "select",
-            "from",
-            "where",
-            "group",
-            "by",
-            "order",
-            "limit",
-            "as",
-            "avg",
-            "sum",
-            "count",
-            "min",
-            "max",
-            "cast",
-            "double",
-            "int",
-            "integer",
-            "float",
-            "decimal",
-            "nullif",
-            "coalesce",
-            "case",
-            "when",
-            "then",
-            "else",
-            "end",
-            "true",
-            "false",
-            "desc",
-            "asc",
-            "and",
-            "or",
-            "with",
-        }
-        identifiers = tokens - BLOCKED - safe_words - aliases - cte_names
-        unknown = sorted(
-            [i for i in identifiers if i != table.lower() and i not in {c.lower() for c in allowed_columns}]
-        )
-        if unknown:
-            findings.append(f"Unknown columns or identifiers: {', '.join(unknown[:8])}")
+            if unknown:
+                findings.append(f"Unknown columns or identifiers: {', '.join(unknown[:8])}")
     if "limit" not in tokens:
         stripped = f"{stripped} LIMIT 100"
     return SafetyResult("blocked" if findings else "safe", findings, None if findings else stripped)
 
 
 def execute_query(db: Session, query: GeneratedSQLQuery, dataset: Dataset) -> SQLExecutionResult:
+    safety = validate_sql(query.validated_sql or query.generated_sql, dataset, {c.column_name for c in dataset.columns})
+    if safety.status != "safe" or not safety.validated_sql:
+        query.safety_status = "blocked"
+        query.safety_findings = safety.findings
+        query.execution_status = "blocked"
+        raise SQLSafetyError(safety.findings)
+    query.validated_sql = safety.validated_sql
     start = time.time()
     con = duckdb.connect(settings.duckdb_path)
-    df = con.execute(query.validated_sql or query.generated_sql).fetchdf()
+    df = con.execute(safety.validated_sql).fetchdf()
     con.close()
     latency = int((time.time() - start) * 1000)
     preview = df.head(100).fillna("").to_dict(orient="records")

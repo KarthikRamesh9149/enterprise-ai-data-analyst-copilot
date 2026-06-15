@@ -82,6 +82,30 @@ def test_sql_generation_validation_approval_execution_and_chart(client: TestClie
     assert client.get(f"/analytics/queries/{query['id']}/chart", headers=auth(tokens["analyst"])).json()["chart_type"] == "bar"
 
 
+def test_approved_sql_is_revalidated_at_execution(client: TestClient, tokens: dict, db):
+    dataset = upload_dataset(client, tokens["analyst"])
+    dataset_id = dataset["id"]
+    client.post(f"/datasets/{dataset_id}/load-to-duckdb", headers=auth(tokens["analyst"]))
+    question = client.post(
+        "/analytics/question",
+        json={"dataset_id": dataset_id, "question": "Which customer segments have the highest churn rate?"},
+        headers=auth(tokens["analyst"]),
+    )
+    query = question.json()["query"]
+    assert client.post("/analytics/approve-sql", json={"query_id": query["id"]}, headers=auth(tokens["reviewer"])).status_code == 200
+
+    from app.db.models import GeneratedSQLQuery
+
+    stored = db.get(GeneratedSQLQuery, query["id"])
+    stored.validated_sql = "DROP TABLE users"
+    db.commit()
+
+    executed = client.post("/analytics/execute-sql", json={"query_id": query["id"]}, headers=auth(tokens["analyst"]))
+
+    assert executed.status_code == 400
+    assert "SQL failed safety validation" in str(executed.json()["detail"])
+
+
 def test_agent_modeling_forecasting_reports_evals_admin(client: TestClient, tokens: dict):
     dataset = upload_dataset(client, tokens["analyst"])
     dataset_id = dataset["id"]
