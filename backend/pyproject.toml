@@ -22,6 +22,7 @@ dependencies = [
   "python-multipart>=0.0.12",
   "redis>=5.1.1",
   "scikit-learn>=1.5.2",
+  "sqlglot>=28.0.0",
   "sqlalchemy>=2.0.35",
   "structlog>=24.4.0",
   "uvicorn[standard]>=0.32.0",

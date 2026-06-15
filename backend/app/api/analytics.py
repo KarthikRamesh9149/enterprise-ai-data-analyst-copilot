@@ -14,7 +14,7 @@ from app.db.session import get_db
 from app.schemas.requests import ApproveSQLRequest, ExecuteSQLRequest, QuestionRequest, ValidateSQLRequest
 from app.services.audit import audit, metric
 from app.services.rate_limit import rate_limit
-from app.services.sql import classify_intent, execute_query, generate_sql, validate_sql
+from app.services.sql import SQLSafetyError, classify_intent, execute_query, generate_sql, validate_sql
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -108,7 +108,12 @@ def execute_sql(payload: ExecuteSQLRequest, user: User = Depends(current_user), 
         db.commit()
         raise HTTPException(status_code=403, detail="Cannot execute another user's query")
     dataset = get_dataset_or_404(db, query.dataset_id, user)
-    result = execute_query(db, query, dataset)
+    try:
+        result = execute_query(db, query, dataset)
+    except SQLSafetyError as exc:
+        audit(db, user.id, "sql.execute_denied", "generated_sql_query", str(query.id), {"reason": "safety", "findings": exc.findings})
+        db.commit()
+        raise HTTPException(status_code=400, detail={"message": "SQL failed safety validation", "findings": exc.findings}) from exc
     audit(db, user.id, "sql.execute", "generated_sql_query", str(query.id), {"rows": result.row_count})
     metric(db, "sql.execution.latency_ms", result.latency_ms, {"query_id": str(query.id)})
     db.commit()
