@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from typing import TypedDict
+from typing import Any, TypedDict, cast
 from uuid import UUID
 
 from langgraph.graph import END, StateGraph
@@ -25,15 +25,15 @@ class AgentState(TypedDict, total=False):
     traces: list[dict]
 
 
-def _timed(name: str, fn: Callable[[AgentState], dict]) -> Callable[[AgentState], dict]:
-    def wrapped(state: AgentState) -> dict:
+def _timed(name: str, fn: Callable[[AgentState], dict]) -> Callable[[AgentState], AgentState]:
+    def wrapped(state: AgentState) -> AgentState:
         start = time.perf_counter()
         update = fn(state)
         latency_ms = max(1, int((time.perf_counter() - start) * 1000))
         summary = update.pop("_summary", "")
         traces = list(state.get("traces", []))
         traces.append({"node": name, "output": summary, "latency_ms": latency_ms})
-        return {**update, "traces": traces}
+        return cast(AgentState, {**update, "traces": traces})
 
     wrapped.__name__ = name
     return wrapped
@@ -97,10 +97,17 @@ def build_graph(dataset: Dataset | None):
         return {"critic": " ".join(notes), "_summary": notes[0]}
 
     graph = StateGraph(AgentState)
-    graph.add_node("intent_classifier", _timed("intent_classifier", intent_node))
-    graph.add_node("schema_inspector", _timed("schema_inspector", schema_node))
-    graph.add_node("planner", _timed("planner", planner_node))
-    graph.add_node("critic", _timed("critic", critic_node))
+    # langgraph's add_node overloads don't accept a precisely-typed node
+    # callable; route through an Any-typed map so mypy is satisfied without
+    # per-line ignores (the nodes are validated at runtime by langgraph).
+    nodes: dict[str, Any] = {
+        "intent_classifier": _timed("intent_classifier", intent_node),
+        "schema_inspector": _timed("schema_inspector", schema_node),
+        "planner": _timed("planner", planner_node),
+        "critic": _timed("critic", critic_node),
+    }
+    for node_name, node_fn in nodes.items():
+        graph.add_node(node_name, node_fn)
     graph.set_entry_point("intent_classifier")
     graph.add_edge("intent_classifier", "schema_inspector")
     graph.add_edge("schema_inspector", "planner")
