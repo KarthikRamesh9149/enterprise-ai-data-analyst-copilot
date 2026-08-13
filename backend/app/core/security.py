@@ -8,6 +8,16 @@ from jose import JWTError, jwt
 
 from app.core.config import settings
 
+_LOCAL_DEMO_SECRET = "explicit-local-demo-only-secret-not-for-production"
+
+
+def signing_secret() -> str:
+    if len(settings.jwt_secret) >= 32:
+        return settings.jwt_secret
+    if settings.app_env == "local" and settings.allow_insecure_local_demo_secret:
+        return _LOCAL_DEMO_SECRET
+    raise RuntimeError("JWT_SECRET must contain at least 32 characters")
+
 
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
@@ -20,11 +30,11 @@ def verify_password(password: str, hashed_password: str) -> bool:
 def create_access_token(subject: str, role: str) -> str:
     expires = datetime.now(UTC) + timedelta(minutes=settings.access_token_expire_minutes)
     payload: dict[str, Any] = {"sub": subject, "role": role, "exp": expires}
-    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+    return jwt.encode(payload, signing_secret(), algorithm=settings.jwt_algorithm)
 
 
 def decode_token(token: str) -> dict[str, Any]:
     try:
-        return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+        return jwt.decode(token, signing_secret(), algorithms=[settings.jwt_algorithm])
     except JWTError as exc:
         raise ValueError("Invalid authentication token") from exc

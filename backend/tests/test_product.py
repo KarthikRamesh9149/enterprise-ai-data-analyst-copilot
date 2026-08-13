@@ -23,6 +23,7 @@ def test_auth_register_login_me_and_invalid_password(client: TestClient):
     assert client.get("/auth/me", headers=auth(token)).status_code == 200
     bad = client.post("/auth/login", json={"email": "a@example.com", "password": "wrong"})
     assert bad.status_code == 401
+    client.post("/auth/logout")
     assert client.get("/datasets").status_code == 401
 
 
@@ -76,6 +77,8 @@ def test_sql_generation_validation_approval_execution_and_chart(client: TestClie
     assert denied.status_code == 403
     approval = client.post("/analytics/approve-sql", json={"query_id": query["id"]}, headers=auth(tokens["reviewer"]))
     assert approval.status_code == 200
+    assert approval.json()["approved_sql_hash"]
+    assert approval.json()["approved_dataset_fingerprint"]
     executed = client.post("/analytics/execute-sql", json={"query_id": query["id"]}, headers=auth(tokens["analyst"]))
     assert executed.status_code == 200, executed.text
     assert executed.json()["row_count"] > 0
@@ -104,6 +107,96 @@ def test_approved_sql_is_revalidated_at_execution(client: TestClient, tokens: di
 
     assert executed.status_code == 400
     assert "SQL failed safety validation" in str(executed.json()["detail"])
+
+
+def test_sql_catalog_allowlist_blocks_extra_and_qualified_tables(client: TestClient, tokens: dict):
+    dataset = upload_dataset(client, tokens["analyst"])
+    dataset_id = dataset["id"]
+    loaded = client.post(f"/datasets/{dataset_id}/load-to-duckdb", headers=auth(tokens["analyst"])).json()
+    table = loaded["duckdb_table_name"]
+    extra = client.post(
+        "/analytics/validate-sql",
+        json={"dataset_id": dataset_id, "sql": f"SELECT d.customer_id FROM {table} d JOIN users u ON TRUE LIMIT 5"},
+        headers=auth(tokens["analyst"]),
+    ).json()
+    qualified = client.post(
+        "/analytics/validate-sql",
+        json={"dataset_id": dataset_id, "sql": f"SELECT customer_id FROM main.{table} LIMIT 5"},
+        headers=auth(tokens["analyst"]),
+    ).json()
+    assert extra["status"] == "blocked"
+    assert any("Unapproved dataset tables" in finding for finding in extra["findings"])
+    assert qualified["status"] == "blocked"
+    assert any("qualified" in finding for finding in qualified["findings"])
+
+
+def test_approval_is_bound_to_dataset_version(client: TestClient, tokens: dict, db):
+    dataset = upload_dataset(client, tokens["analyst"])
+    client.post(f"/datasets/{dataset['id']}/load-to-duckdb", headers=auth(tokens["analyst"]))
+    query = client.post(
+        "/analytics/question",
+        json={"dataset_id": dataset["id"], "question": "Which customer segments have the highest churn rate?"},
+        headers=auth(tokens["analyst"]),
+    ).json()["query"]
+    assert client.post("/analytics/approve-sql", json={"query_id": query["id"]}, headers=auth(tokens["reviewer"])).status_code == 200
+
+    from app.db.models import Dataset
+
+    stored_dataset = db.get(Dataset, dataset["id"])
+    stored_dataset.content_hash = "0" * 64
+    db.commit()
+    response = client.post("/analytics/execute-sql", json={"query_id": query["id"]}, headers=auth(tokens["analyst"]))
+    assert response.status_code == 400
+    assert "Approval binding" in str(response.json()["detail"])
+
+
+def test_result_row_budget_fails_closed(client: TestClient, tokens: dict, monkeypatch):
+    dataset = upload_dataset(client, tokens["analyst"])
+    client.post(f"/datasets/{dataset['id']}/load-to-duckdb", headers=auth(tokens["analyst"]))
+    query = client.post(
+        "/analytics/question",
+        json={"dataset_id": dataset["id"], "question": "Show customer records"},
+        headers=auth(tokens["analyst"]),
+    ).json()["query"]
+    assert client.post("/analytics/approve-sql", json={"query_id": query["id"]}, headers=auth(tokens["reviewer"])).status_code == 200
+    monkeypatch.setattr("app.core.config.settings.sql_max_rows", 2)
+    response = client.post("/analytics/execute-sql", json={"query_id": query["id"]}, headers=auth(tokens["analyst"]))
+    assert response.status_code == 400
+    assert "row materialization budget" in str(response.json()["detail"])
+
+
+def test_approval_resource_owner_mismatch_is_denied(client: TestClient, tokens: dict, db):
+    dataset = upload_dataset(client, tokens["analyst"])
+    client.post(f"/datasets/{dataset['id']}/load-to-duckdb", headers=auth(tokens["analyst"]))
+    client.post(
+        "/analytics/question",
+        json={"dataset_id": dataset["id"], "question": "Which customer segments have the highest churn rate?"},
+        headers=auth(tokens["analyst"]),
+    )
+    from app.db.models import Approval, User
+
+    approval = db.query(Approval).first()
+    approval.requested_by = db.query(User).filter(User.email == "viewer@example.com").one().id
+    db.commit()
+    response = client.post(f"/approvals/{approval.id}/approve", json={}, headers=auth(tokens["reviewer"]))
+    assert response.status_code == 403
+
+
+def test_cookie_session_and_production_secret_fail_closed(client: TestClient, monkeypatch):
+    registered = client.post("/auth/register", json={"email": "cookie@example.com", "password": "DemoPassword123!"})
+    assert registered.status_code == 200
+    assert "HttpOnly" in registered.headers["set-cookie"]
+    assert client.get("/auth/me").status_code == 200
+    assert client.post("/auth/logout").status_code == 204
+    assert client.get("/auth/me").status_code == 401
+
+    from app.core.security import create_access_token
+
+    monkeypatch.setattr("app.core.config.settings.app_env", "production")
+    monkeypatch.setattr("app.core.config.settings.jwt_secret", "")
+    monkeypatch.setattr("app.core.config.settings.allow_insecure_local_demo_secret", False)
+    with __import__("pytest").raises(RuntimeError, match="JWT_SECRET"):
+        create_access_token("user", "viewer")
 
 
 def test_agent_modeling_forecasting_reports_evals_admin(client: TestClient, tokens: dict):

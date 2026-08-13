@@ -14,7 +14,7 @@ from app.db.session import get_db
 from app.schemas.requests import ApproveSQLRequest, ExecuteSQLRequest, QuestionRequest, ValidateSQLRequest
 from app.services.audit import audit, metric
 from app.services.rate_limit import rate_limit
-from app.services.sql import SQLSafetyError, classify_intent, execute_query, generate_sql, validate_sql
+from app.services.sql import SQLSafetyError, bind_approval, classify_intent, execute_query, generate_sql, validate_sql
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -79,14 +79,21 @@ def approve_sql(payload: ApproveSQLRequest, user: User = Depends(require_permiss
         raise HTTPException(status_code=404, detail="Query not found")
     if query.safety_status != "safe":
         raise HTTPException(status_code=400, detail="Unsafe SQL cannot be approved")
-    query.approval_status = "approved"
-    query.approved_at = datetime.utcnow()
+    dataset = get_dataset_or_404(db, query.dataset_id, user)
+    if dataset.uploaded_by != query.user_id:
+        raise HTTPException(status_code=403, detail="Query and dataset ownership mismatch")
     approval = db.query(Approval).filter(Approval.resource_id == query.id, Approval.resource_type == "generated_sql_query").first()
-    if approval:
-        approval.status = "approved"
-        approval.approved_by = user.id
-        approval.reviewed_at = datetime.utcnow()
-        approval.reviewer_notes = payload.reviewer_notes
+    if not approval or approval.requested_by != query.user_id:
+        raise HTTPException(status_code=403, detail="Approval resource ownership mismatch")
+    try:
+        bind_approval(query, dataset)
+    except SQLSafetyError as exc:
+        raise HTTPException(status_code=400, detail={"message": "SQL failed safety validation", "findings": exc.findings}) from exc
+    query.approved_at = datetime.utcnow()
+    approval.status = "approved"
+    approval.approved_by = user.id
+    approval.reviewed_at = datetime.utcnow()
+    approval.reviewer_notes = payload.reviewer_notes
     audit(db, user.id, "sql.approve", "generated_sql_query", str(query.id))
     db.commit()
     return query

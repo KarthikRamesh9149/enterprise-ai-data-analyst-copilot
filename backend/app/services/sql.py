@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
+import threading
 import time
 from dataclasses import dataclass
 from typing import cast
@@ -46,6 +49,21 @@ class SQLSafetyError(ValueError):
     def __init__(self, findings: list[str]) -> None:
         super().__init__("SQL failed safety validation")
         self.findings = findings
+
+
+def sql_fingerprint(sql: str) -> str:
+    return hashlib.sha256(sql.encode("utf-8")).hexdigest()
+
+
+def dataset_fingerprint(dataset: Dataset) -> str:
+    payload = {
+        "id": str(dataset.id),
+        "content_hash": dataset.content_hash,
+        "table": dataset.duckdb_table_name,
+        "rows": dataset.row_count,
+        "columns": sorted((c.column_name, c.inferred_type) for c in dataset.columns),
+    }
+    return hashlib.sha256(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()).hexdigest()
 
 
 def classify_intent(question: str) -> str:
@@ -126,9 +144,21 @@ def validate_sql(sql: str, dataset: Dataset, allowed_columns: set[str] | None = 
     elif parsed is None and not re.match(r"^\s*(select|with)\b", stripped, re.IGNORECASE | re.DOTALL):
         findings.append("Only SELECT or WITH queries are allowed")
     if parsed is not None:
-        table_names = {table_expr.name for table_expr in parsed.find_all(exp.Table)}
-        if table not in table_names:
-            findings.append("SQL must reference the selected dataset table")
+        cte_names = {cte.alias_or_name.lower() for cte in parsed.find_all(exp.CTE)}
+        physical_tables: set[str] = set()
+        for table_expr in parsed.find_all(exp.Table):
+            name = table_expr.name.lower()
+            if name in cte_names:
+                continue
+            physical_tables.add(name)
+            if table_expr.catalog or table_expr.db:
+                findings.append("Catalog- and schema-qualified table access is blocked")
+        if physical_tables != {table.lower()}:
+            unexpected = sorted(physical_tables - {table.lower()})
+            if unexpected:
+                findings.append(f"Unapproved dataset tables: {', '.join(unexpected)}")
+            if table.lower() not in physical_tables:
+                findings.append("SQL must reference the selected dataset table")
     elif table not in stripped:
         findings.append("SQL must reference the selected dataset table")
     selected_all = bool(parsed and list(parsed.find_all(exp.Star))) or bool(
@@ -179,6 +209,24 @@ def validate_sql(sql: str, dataset: Dataset, allowed_columns: set[str] | None = 
     return SafetyResult("blocked" if findings else "safe", findings, None if findings else stripped)
 
 
+def bind_approval(query: GeneratedSQLQuery, dataset: Dataset) -> None:
+    safety = validate_sql(query.validated_sql or query.generated_sql, dataset, {c.column_name for c in dataset.columns})
+    if safety.status != "safe" or not safety.validated_sql:
+        raise SQLSafetyError(safety.findings)
+    query.validated_sql = safety.validated_sql
+    query.approved_sql_hash = sql_fingerprint(safety.validated_sql)
+    query.approved_dataset_fingerprint = dataset_fingerprint(dataset)
+    query.approval_status = "approved"
+
+
+def _cell_size(value: object) -> int:
+    if value is None:
+        return 1
+    if isinstance(value, bytes):
+        return len(value)
+    return len(str(value).encode("utf-8"))
+
+
 def execute_query(db: Session, query: GeneratedSQLQuery, dataset: Dataset) -> SQLExecutionResult:
     safety = validate_sql(query.validated_sql or query.generated_sql, dataset, {c.column_name for c in dataset.columns})
     if safety.status != "safe" or not safety.validated_sql:
@@ -186,12 +234,47 @@ def execute_query(db: Session, query: GeneratedSQLQuery, dataset: Dataset) -> SQ
         query.safety_findings = safety.findings
         query.execution_status = "blocked"
         raise SQLSafetyError(safety.findings)
+    current_sql_hash = sql_fingerprint(safety.validated_sql)
+    current_dataset_fingerprint = dataset_fingerprint(dataset)
+    if (
+        not query.approved_sql_hash
+        or not query.approved_dataset_fingerprint
+        or query.approved_sql_hash != current_sql_hash
+        or query.approved_dataset_fingerprint != current_dataset_fingerprint
+    ):
+        query.approval_status = "revoked"
+        query.execution_status = "blocked"
+        raise SQLSafetyError(["Approval binding no longer matches the normalized SQL and dataset version"])
     query.validated_sql = safety.validated_sql
-    start = time.time()
+    start = time.monotonic()
     con = duckdb.connect(settings.duckdb_path)
-    df = con.execute(safety.validated_sql).fetchdf()
-    con.close()
-    latency = int((time.time() - start) * 1000)
+    timer = threading.Timer(settings.sql_timeout_seconds, con.interrupt)
+    rows: list[tuple] = []
+    columns: list[str] = []
+    result_bytes = 0
+    try:
+        con.execute("SET enable_external_access = false")
+        con.execute(f"SET memory_limit = '{settings.sql_memory_limit_mb}MB'")
+        timer.start()
+        cursor = con.execute(f"SELECT * FROM ({safety.validated_sql}) AS _approved_query LIMIT {settings.sql_max_rows + 1}")
+        columns = [item[0] for item in cursor.description]
+        while batch := cursor.fetchmany(min(500, settings.sql_max_rows + 1 - len(rows))):
+            for row in batch:
+                result_bytes += sum(_cell_size(value) for value in row)
+                if result_bytes > settings.sql_max_result_bytes:
+                    raise SQLSafetyError(["Query result exceeded the byte materialization budget"])
+                rows.append(row)
+                if len(rows) > settings.sql_max_rows:
+                    raise SQLSafetyError(["Query result exceeded the row materialization budget"])
+    except duckdb.Error as exc:
+        if time.monotonic() - start >= settings.sql_timeout_seconds:
+            raise SQLSafetyError(["Query exceeded the execution time budget"]) from exc
+        raise SQLSafetyError(["DuckDB rejected the governed query"]) from exc
+    finally:
+        timer.cancel()
+        con.close()
+    df = pd.DataFrame.from_records(rows, columns=columns)
+    latency = int((time.monotonic() - start) * 1000)
     preview = df.head(100).fillna("").to_dict(orient="records")
     result = SQLExecutionResult(
         sql_query_id=query.id,

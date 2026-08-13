@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Activity, BarChart3, ClipboardCheck, Database, FileText, Gauge, LineChart, LogOut, ShieldCheck, Sparkles, Users } from "lucide-react";
-import { clearToken } from "@/lib/api";
+import { clearSession } from "@/lib/api";
 
 const nav = [
   { href: "/", label: "Dashboard", icon: Gauge, roles: ["admin", "analyst", "reviewer", "viewer"] },
@@ -63,8 +63,8 @@ export function AppShell({ children, role = "viewer" }: { children: React.ReactN
             <span className="rounded-md border border-line bg-[#f8fafc] px-2 py-1 text-xs font-bold uppercase text-muted">{role}</span>
             <button
               className="btn secondary"
-              onClick={() => {
-                clearToken();
+              onClick={async () => {
+                await clearSession();
                 router.push("/login");
               }}
               title="Log out"

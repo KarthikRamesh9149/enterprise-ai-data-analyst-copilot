@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { Upload, RefreshCw } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Status } from "@/components/Status";
-import { api, API_BASE, getToken } from "@/lib/api";
+import { api, API_BASE } from "@/lib/api";
 import type { Dataset } from "@/types/api";
 
 export default function DatasetsPage() {
@@ -21,7 +21,7 @@ export default function DatasetsPage() {
     if (!file) return;
     const form = new FormData();
     form.append("file", file);
-    const response = await fetch(`${API_BASE}/datasets/upload`, { method: "POST", body: form, headers: { Authorization: `Bearer ${getToken()}` } });
+    const response = await fetch(`${API_BASE}/datasets/upload`, { method: "POST", body: form, credentials: "include" });
     setMessage(response.ok ? "Dataset uploaded." : await response.text());
     load();
   }

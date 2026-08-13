@@ -141,6 +141,8 @@ class GeneratedSQLQuery(Base):
     safety_status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
     safety_findings: Mapped[list] = mapped_column(JsonType(), default=list)
     approval_status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
+    approved_sql_hash: Mapped[str | None] = mapped_column(String(64))
+    approved_dataset_fingerprint: Mapped[str | None] = mapped_column(String(64))
     execution_status: Mapped[str] = mapped_column(String(32), default="not_started", index=True)
     latency_ms: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = ts()

@@ -41,6 +41,7 @@ def db() -> Generator[Session, None, None]:
 
 @pytest.fixture()
 def client(db: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    monkeypatch.setattr("app.core.config.settings.jwt_secret", "test-only-jwt-secret-with-at-least-32-characters")
     monkeypatch.setattr("app.core.config.settings.upload_dir", str(tmp_path / "uploads"))
     monkeypatch.setattr("app.core.config.settings.duckdb_path", str(tmp_path / "analytics.duckdb"))
     monkeypatch.setattr("app.core.config.settings.sql_generator_provider", "mock")

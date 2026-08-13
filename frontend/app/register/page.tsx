@@ -2,15 +2,14 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, setToken } from "@/lib/api";
+import { api } from "@/lib/api";
 
 export default function RegisterPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   async function submit() {
-    const res = await api<{ access_token: string }>("/auth/register", { method: "POST", body: JSON.stringify({ email, password, role: "viewer" }) });
-    setToken(res.access_token);
+    await api("/auth/register", { method: "POST", body: JSON.stringify({ email, password, role: "viewer" }) });
     router.push("/");
   }
   return (

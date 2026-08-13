@@ -2,431 +2,143 @@
 
 [![CI](https://github.com/KarthikRamesh9149/enterprise-ai-data-analyst-copilot/actions/workflows/ci.yml/badge.svg)](https://github.com/KarthikRamesh9149/enterprise-ai-data-analyst-copilot/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Stack](https://img.shields.io/badge/AI%20Stack-FastAPI%20%7C%20LangGraph%20%7C%20DuckDB%20%7C%20MLflow-blue)](#tech-stack)
 
-An end-to-end, local-first enterprise analytics SaaS that turns business questions into governed SQL, charts, churn predictions, revenue forecasts, model cards, executive reports, evaluations, and audit logs.
+A local-first analytics product that turns business questions into governed SQL, charts, churn scores, revenue forecasts, model cards, and executive reports. It is designed to demonstrate the boundary that matters in enterprise AI: model output is untrusted until deterministic controls and a human approval gate authorize one exact operation over one exact dataset version.
 
-This project is built as a portfolio-grade AI engineering product, not a notebook demo. It demonstrates full-stack product engineering, agentic AI workflow design, analytics engineering, ML experimentation, SQL governance, model risk awareness, and local-first infrastructure.
+![Analytics workflow](docs/assets/product-e2e-analytics.png)
 
-![Enterprise AI Data Analyst Copilot analytics workflow](docs/assets/product-e2e-analytics.png)
+## Why this project exists
 
-## Portfolio Links
+Notebook demos usually collapse generation, authorization, and execution into one step. This application separates them. An analyst uploads and profiles a CSV, asks a question, reviews generated SQL, obtains approval from a reviewer, and only then executes a cryptographically bound query in DuckDB. The rest of the product includes traceable agent planning, ML workflows, evaluations, reports, RBAC, and audit records.
 
-- [Portfolio case study](CASE_STUDY.md)
-- [Architecture notes](docs/architecture.md)
-- [Security and governance notes](docs/security.md)
-- [SQL safety design](docs/sql-safety.md)
-- [Model governance notes](docs/model-governance.md)
-- [Demo walkthrough](docs/demo-script.md)
-- [Contribution workflow](CONTRIBUTING.md)
-- [Security policy](SECURITY.md)
+The default experience is offline and deterministic. No API key, network model call, or paid service is required.
 
-## Project Snapshot
-
-**One-line summary:** Built an enterprise-grade AI Data Analyst and Forecasting Copilot using FastAPI, LangGraph, DuckDB, PostgreSQL, scikit-learn, MLflow, Next.js, Docker, and SQL approval workflows.
-
-**Best-fit roles this project demonstrates:**
-
-- AI Engineer
-- GenAI Engineer
-- Agentic AI Builder
-- Data Scientist
-- Analytics Engineer
-- ML Engineer
-- LLMOps Engineer
-- Full-Stack Product Engineer
-
-**What makes it stand out:**
-
-- Real SaaS-style product, not a chatbot wrapper.
-- Local-first and reproducible with Docker Compose.
-- Governance-first AI workflow: generated SQL is validated and requires human approval before execution.
-- Practical ML workflows: churn model training, feature importance, risk scoring, revenue forecasting, MLflow logging, model cards.
-- Enterprise polish: RBAC, audit logs, approval queue, data quality dashboard, evaluation runner, observability/admin screens.
-- Optional OpenAI provider support while keeping deterministic mock providers for tests and local demos.
-
-## Product Story
-
-Business users often ask questions like:
-
-> "Why did churn increase, which customers are at risk, and what should we do next?"
-
-This product answers that through a governed analytics workflow:
-
-1. Upload a customer or revenue CSV.
-2. Validate and profile the dataset.
-3. Inspect schema, sample rows, and data quality warnings.
-4. Ask a natural-language analytics question.
-5. Generate SQL through a mock or optional OpenAI provider.
-6. Validate SQL against a strict allowlist.
-7. Require reviewer/admin approval.
-8. Execute approved SQL in DuckDB.
-9. Return result tables and Plotly chart specs.
-10. Train churn models, score at-risk customers, forecast revenue, and generate executive reports.
-11. Log traces, audit events, evaluations, and model metadata.
-
-## Feature Highlights
-
-### AI Analytics Copilot
-
-- Natural-language question intake.
-- Intent classification for analytics, EDA, modeling, and forecasting.
-- Mock/local deterministic SQL provider for no-key demos.
-- Optional OpenAI-compatible SQL/report generation.
-- LangGraph-style workflow with persisted trace records.
-- Critic-style final review node for unsupported-claim awareness.
-
-### SQL Governance
-
-- Only single-statement `SELECT` or `WITH` queries are allowed.
-- Blocks DDL/DML, multiple statements, DuckDB external file access, `COPY`, `ATTACH`, `INSTALL`, `LOAD`, `PRAGMA`, and sensitive columns.
-- Blocks wildcard projections when sensitive-pattern columns exist.
-- Validates table and column references.
-- Requires human approval before query execution.
-- Stores generated SQL, safety findings, approval status, execution status, result metadata, charts, and audit logs.
-
-### Data Platform
-
-- CSV upload with file-size limits and safe filenames.
-- Dataset validation for required churn columns, invalid dates, negative revenue, duplicate customer IDs, class imbalance, and sensitive columns.
-- Dataset profiling with inferred types, missingness, unique counts, numeric summary, sample values, duplicate rows, and quality score.
-- DuckDB loading for local analytical execution.
-- PostgreSQL metadata schema for app state.
-
-### Data Science and ML
-
-- Churn classification with scikit-learn RandomForest.
-- Numeric/categorical preprocessing pipeline.
-- Accuracy, F1, and ROC AUC metrics.
-- Feature importance extraction.
-- Customer risk scoring with risk bands and recommended actions.
-- Revenue forecasting with a local regression workflow.
-- MLflow tracking for training/forecast runs.
-- Model cards with intended use, limitations, risk notes, and monitoring recommendations.
-
-### Enterprise App Surface
-
-- JWT authentication.
-- Role-based access control: `admin`, `analyst`, `reviewer`, `viewer`.
-- Dataset ownership checks.
-- Approval queue.
-- Reports page.
-- Evaluations dashboard.
-- Admin analytics and observability.
-- Audit logs.
-- Role-aware navigation.
-
-## Tech Stack
-
-| Layer | Tools |
-| --- | --- |
-| Frontend | Next.js App Router, React, TypeScript, Tailwind CSS, Plotly, Lucide icons |
-| Backend | FastAPI, Pydantic v2, SQLAlchemy 2, Alembic |
-| Analytics | DuckDB, Pandas |
-| ML | scikit-learn, MLflow |
-| Agent Workflow | LangGraph-style state workflow |
-| Metadata DB | PostgreSQL locally via Docker Compose |
-| Cache/Rate Limit | Redis service plus simple local rate limiter |
-| Auth/Governance | JWT, bcrypt, RBAC, approval workflows, audit logs |
-| Quality | pytest, ruff, mypy, TypeScript, Next build, npm audit |
-| Infrastructure | Docker Compose, Makefile, GitHub Actions |
-
-## Architecture Diagram
-
-The architecture separates the product UI, API layer, metadata store, analytical execution engine, ML workflow, and AI governance path. This is intentionally closer to an internal enterprise SaaS than a notebook or single-page chatbot demo.
+## Architecture
 
 ```mermaid
-flowchart TB
-  subgraph Client["Client Experience"]
-    User["Business user, analyst, reviewer, admin"]
-    UI["Next.js enterprise UI\nDashboards, datasets, SQL review, modeling, reports, admin"]
-  end
-
-  subgraph API["FastAPI Application Layer"]
-    Auth["JWT auth and RBAC"]
-    DatasetAPI["Dataset upload, validation, profiling"]
-    AnalystAPI["Natural language analytics API"]
-    MLAPI["Modeling, forecasting, report APIs"]
-    AdminAPI["Audit, evals, observability APIs"]
-  end
-
-  subgraph AI["AI and Governance Layer"]
-    Agent["LangGraph-style analyst workflow"]
-    Provider["Mock provider or optional OpenAI provider"]
-    Validator["SQL safety validator\nAllowlisted SELECT/WITH only"]
-    Approval["Human approval queue\nReviewer/admin gate"]
-    Evals["Evaluation runner\nGolden prompts and safety checks"]
-  end
-
-  subgraph Data["Data and ML Layer"]
-    Postgres[("PostgreSQL\nUsers, datasets, queries, approvals, audit")]
-    DuckDB[("DuckDB\nLocal analytical execution over uploaded CSVs")]
-    Storage["Local storage\nUploads, generated reports"]
-    MLflow["MLflow\nRuns, metrics, artifacts"]
-    Redis["Redis\nCache/rate-limit support"]
-  end
-
-  User --> UI
-  UI --> Auth
-  UI --> DatasetAPI
-  UI --> AnalystAPI
-  UI --> MLAPI
-  UI --> AdminAPI
-
-  Auth --> Postgres
-  DatasetAPI --> Storage
-  DatasetAPI --> Postgres
-  DatasetAPI --> DuckDB
-
-  AnalystAPI --> Agent
-  Agent --> Provider
-  Provider --> Validator
-  Validator --> Approval
-  Approval --> DuckDB
-  AnalystAPI --> Postgres
-  AnalystAPI --> Redis
-
-  MLAPI --> DuckDB
-  MLAPI --> MLflow
-  MLAPI --> Storage
-  MLAPI --> Postgres
-
-  AdminAPI --> Evals
-  AdminAPI --> Postgres
-  Evals --> Agent
+flowchart LR
+  UI["Next.js UI\nHttpOnly session cookie"] --> API["FastAPI\nRBAC and ownership"]
+  API --> META[("PostgreSQL or SQLite\nmetadata and audit")]
+  API --> PROFILE["CSV validation\nand profiling"]
+  PROFILE --> DUCK[("DuckDB\nrestricted analytics")]
+  API --> AGENT["LangGraph workflow"]
+  AGENT --> PROVIDER["Deterministic mock\nor optional OpenAI"]
+  PROVIDER --> AST["sqlglot AST\ntable and column allowlist"]
+  AST --> APPROVAL["Human approval\nSQL plus dataset fingerprint"]
+  APPROVAL --> BUDGET["Row, byte, time\nand memory budgets"]
+  BUDGET --> DUCK
+  API --> ML["scikit-learn\nand MLflow"]
 ```
 
-## Governed AI Workflow
+Core boundaries:
 
-Generated SQL is treated as untrusted input. The product validates, records, and routes it through human approval before any query can run against DuckDB.
+- `frontend/`: Next.js App Router UI. Browser sessions use an `HttpOnly`, `SameSite=Lax` cookie; bearer tokens are not persisted in `localStorage`.
+- `backend/app/api/`: authentication, datasets, analytics, approvals, modeling, forecasting, reports, evaluations, and administration.
+- `backend/app/services/sql.py`: generation, AST validation, immutable approval fingerprints, restricted DuckDB execution, and materialization budgets.
+- `backend/app/agents/`: a traceable LangGraph intent/schema/planner/critic workflow.
+- `backend/app/ml/`: local churn and forecasting workflows with MLflow metadata.
 
-```mermaid
-sequenceDiagram
-  autonumber
-  actor Analyst
-  participant UI as Next.js UI
-  participant API as FastAPI
-  participant Agent as Analyst Workflow
-  participant LLM as Mock/OpenAI Provider
-  participant Guard as SQL Safety Validator
-  participant Reviewer as Reviewer/Admin
-  participant DB as DuckDB
-  participant Audit as Audit Log
+## Governed query lifecycle
 
-  Analyst->>UI: Ask a business question
-  UI->>API: Submit question and dataset id
-  API->>Agent: Build schema-aware analyst state
-  Agent->>LLM: Generate SQL and reasoning
-  LLM-->>Agent: Candidate SQL
-  Agent->>Guard: Validate SQL
-  Guard-->>API: Safety status and findings
-  API->>Audit: Store trace, SQL, safety result
-  API-->>UI: Show SQL for review
-  Reviewer->>UI: Approve safe query
-  UI->>API: Approval decision
-  API->>DB: Execute approved SELECT/WITH query
-  DB-->>API: Result rows
-  API->>Audit: Store execution metadata
-  API-->>UI: Return table and chart spec
-```
+1. The analyst selects a dataset. Its content hash, generated table identifier, row count, and typed schema form the dataset fingerprint.
+2. The mock or optional external provider proposes SQL. Provider output has no authority.
+3. `sqlglot` parses exactly one `SELECT`/`WITH` statement. Every physical table must equal the selected dataset table; catalog/schema-qualified and extra tables are rejected. Columns must exist in the dataset schema, external access and mutating operations are blocked, and sensitive-name columns are denied.
+4. Approval revalidates normalized SQL and stores SHA-256 fingerprints of both that SQL and the dataset version.
+5. Execution revalidates everything and compares both fingerprints. Any SQL, schema, content, table, or dataset metadata drift revokes the approval.
+6. DuckDB runs with external access disabled and a memory limit. A timer interrupts long work, rows are streamed in batches, and row and byte caps are checked before a DataFrame or chart is materialized.
 
-## Repository Structure
+Default execution limits are configurable:
 
-```text
-backend/              FastAPI app, services, agents, ML, evals, tests, Alembic
-frontend/             Next.js app router UI, components, API client, types
-demo-data/            Synthetic churn, revenue, and evaluation data
-docs/                 Architecture, security, SQL safety, model governance, evals
-scripts/              Demo data generator
-.github/workflows/   CI pipeline and PR checklist
-docker-compose.yml    Local Postgres, Redis, MLflow, backend, frontend
-Makefile              Common local commands
-```
+| Control | Default | Environment variable |
+| --- | ---: | --- |
+| Returned rows | 1,000 | `SQL_MAX_ROWS` |
+| Materialized result bytes | 5,000,000 | `SQL_MAX_RESULT_BYTES` |
+| Wall-clock execution | 5 seconds | `SQL_TIMEOUT_SECONDS` |
+| DuckDB memory | 256 MB | `SQL_MEMORY_LIMIT_MB` |
+| CSV upload | 25 MB | `MAX_UPLOAD_SIZE_MB` |
 
-## Local Quickstart
+Exceeding a limit fails closed; partial results are not persisted.
 
-### 1. Create `.env`
+## Local quickstart
 
-Use the included `.env.example` or create `.env` with local defaults.
-
-The app works without an OpenAI key:
-
-```env
-SQL_GENERATOR_PROVIDER=mock
-REPORT_GENERATOR_PROVIDER=mock
-OPENAI_API_KEY=
-```
-
-To enable OpenAI-backed SQL/report generation:
-
-```env
-SQL_GENERATOR_PROVIDER=openai
-REPORT_GENERATOR_PROVIDER=openai
-OPENAI_API_KEY=your_key_here
-```
-
-Tests always force mock providers so CI and local verification do not spend API credits.
-
-### 2. Generate Demo Data
+Requirements: Docker with Compose, or Python 3.11+ and Node.js 24 for running services individually.
 
 ```bash
-make demo-data
-```
-
-### 3. Start the Local Product
-
-```bash
+cp .env.example .env
 docker compose up --build
 ```
 
-Then open:
-
-- Frontend: `http://localhost:3000`
-- Backend health: `http://localhost:8000/health`
-- MLflow: `http://localhost:5000`
-
-### 4. Run Migrations and Seed Users
+In another shell:
 
 ```bash
 make migrate
 make seed
 ```
 
-Demo users use `DemoPassword123!`:
+Open the UI at `http://localhost:3000`, API health at `http://localhost:8000/health`, and MLflow at `http://localhost:5000`.
 
-| Email | Role |
-| --- | --- |
-| `admin@example.com` | Admin |
-| `analyst@example.com` | Analyst |
-| `reviewer@example.com` | Reviewer |
-| `viewer@example.com` | Viewer |
+`.env.example` explicitly enables a fixed secret only for the local demo. Any non-local environment fails closed unless `JWT_SECRET` is set to at least 32 characters. Set `AUTH_COOKIE_SECURE=true` behind HTTPS. CORS origins must be exact same-origin frontends because cookie-authenticated mutations reject missing or unapproved `Origin` headers.
 
-## Demo Walkthrough
+Seeded local accounts use `DemoPassword123!`: `admin@example.com`, `analyst@example.com`, `reviewer@example.com`, and `viewer@example.com`. Public registration always creates a viewer regardless of the submitted role.
 
-Use this flow for a 3 to 5 minute portfolio demo:
+## Provider and cost behavior
 
-1. Log in as `analyst@example.com`.
-2. Upload `demo-data/customer_churn.csv`.
-3. Validate the dataset and show the data quality profile.
-4. Load the dataset to DuckDB.
-5. Ask: `Which customer segments have the highest churn rate?`
-6. Show generated SQL and safety validation.
-7. Approve SQL as reviewer/admin.
-8. Execute SQL and show result table/chart.
-9. Train the churn model.
-10. Show model metrics, feature importance, and at-risk customers.
-11. Upload or use `demo-data/monthly_revenue.csv`.
-12. Run revenue forecasting.
-13. Generate an executive report.
-14. Show evaluation results, audit logs, and observability.
-15. Explain future Supabase/deployment plans.
+`SQL_GENERATOR_PROVIDER=mock` and `REPORT_GENERATOR_PROVIDER=mock` are the defaults. This path is deterministic, works offline, and makes zero paid calls. Tests force mock mode. The repository does not contain a key.
 
-Full script: [`docs/demo-script.md`](docs/demo-script.md)
+Setting a provider to `openai` and supplying `OPENAI_API_KEY` opts into external processing and usage billed by that provider. SQL and report calls use `OPENAI_CHAT_MODEL` (default `gpt-4.1-mini`), temperature `0`, and `MAX_OUTPUT_TOKENS=1200`. Malformed provider output falls back to deterministic local generation; provider SQL never bypasses governance. Treat uploaded schemas/questions sent in this mode as data disclosed to the provider and apply your organization’s retention and classification policy.
+
+## Security model
+
+- Passwords are bcrypt-hashed; signed JWTs are transported to the browser in an `HttpOnly`, `SameSite=Lax` cookie. API clients may still use bearer tokens.
+- RBAC distinguishes admin, analyst, reviewer, and viewer permissions. Dataset ownership is enforced for processing and execution.
+- Public registration cannot self-assign elevated roles.
+- CSV uploads are extension-checked, size-capped, hashed, safely renamed, parsed, and profiled.
+- SQL uses a parsed physical-table/catalog allowlist, schema column allowlist, sensitive-name denial, immutable approval binding, and execution budgets.
+- DuckDB external access is disabled for governed execution. DDL/DML, multiple statements, `COPY`, `ATTACH`, `INSTALL`, `LOAD`, `PRAGMA`, and external readers are denied before execution.
+- Approval and execution decisions are auditable; query results and charts retain ownership checks.
+
+Production deployments still need HTTPS, a secret manager, a hardened reverse proxy, centralized identity/SSO, database-level tenant isolation, encrypted storage, log redaction/retention, malware/content inspection, backup/restore drills, and distributed rate limiting. The included rate limiter and local storage are demo-grade, not a production perimeter.
+
+## Threat model
+
+| Threat | Implemented mitigation | Remaining operational responsibility |
+| --- | --- | --- |
+| Prompt-generated destructive SQL | Single-statement read-only AST validation | Keep dependencies patched and expand adversarial evals |
+| Cross-dataset/catalog access | Exact physical-table allowlist; qualified tables rejected | Add database tenant policies for multi-tenant production |
+| Approval changed after review | Hash binding to normalized SQL and dataset fingerprint, checked again at execution | Protect metadata DB and reviewer identities |
+| Expensive/result-amplifying query | time, memory, row, and byte caps; streaming fetch | Isolate workers and apply OS/container CPU quotas |
+| Browser token theft through JavaScript | `HttpOnly` cookie; no persistent JS token storage | CSP, HTTPS, dependency governance, XSS testing |
+| CSRF with cookie auth | SameSite cookie and exact-Origin check on mutations | Keep frontend/API origins aligned; add proxy-level origin controls |
+| Weak deployment secret | no fallback outside explicitly enabled local demo | Provision and rotate a 32+ character secret |
+| Sensitive column disclosure | sensitive-name detection and query denial | Data classification/DLP beyond name heuristics |
 
 ## Verification
 
-These checks were used during development:
+Run the same deterministic gates as CI:
 
 ```bash
-cd backend
-python -m ruff check .
-python -m mypy app
-python -m pytest -q
-python -m app.scripts.run_evals
-python -m app.scripts.smoke
-
-cd ../frontend
-npm run typecheck
-npm run build
-npm audit --audit-level=moderate
-
-cd ..
-docker compose config
+make verify
+cd backend && python -m app.scripts.run_evals && python -m app.scripts.smoke
+cd ../frontend && npm audit --audit-level=moderate
+cd .. && docker compose config
 ```
 
-Expected status:
+`make verify` runs demo-data generation, Ruff, mypy, pytest, TypeScript type checking, and the production frontend build. Tests include adversarial catalog access, approval drift, query-budget enforcement, cookie sessions, production-secret failure, real validator use, and signal-derived agent confidence. No test enables a paid provider.
 
-- Backend lint: passing.
-- Backend typecheck: passing.
-- Backend tests: passing.
-- Frontend typecheck: passing.
-- Frontend build: passing.
-- npm audit at moderate level: passing.
-- Docker Compose config: valid.
+## Product capabilities
 
-## Security and Governance
+- CSV validation, schema inspection, profiles, samples, quality warnings, and DuckDB loading.
+- Natural-language analytics with deterministic or optional model-backed SQL generation.
+- Approval queue, result tables, Plotly chart specifications, query history, and audit events.
+- Churn training and scoring with scikit-learn, feature importance, risk bands, and model cards.
+- Revenue forecasting, executive report generation, MLflow metadata, evaluation cases, and agent traces.
 
-Implemented local enterprise security basics:
+Detailed design and operating notes: [architecture](docs/architecture.md), [SQL safety](docs/sql-safety.md), [security](docs/security.md), [evaluations](docs/evaluation.md), [local development](docs/local-development.md), [API](docs/api.md), and the [case study](CASE_STUDY.md).
 
-- JWT authentication.
-- bcrypt password hashing.
-- RBAC dependencies.
-- Least-privilege public registration.
-- Dataset ownership checks.
-- Upload extension/size checks and parser cleanup.
-- SQL allowlist validation.
-- Sensitive-column detection.
-- Wildcard projection blocking for sensitive schemas.
-- Human approval before SQL execution.
-- Query ownership checks for results/charts/traces.
-- Audit logs for key workflows.
-- `.env` is ignored and not committed.
+## Scope and limitations
 
-See [`docs/security.md`](docs/security.md) and [`docs/sql-safety.md`](docs/sql-safety.md).
-
-## AI Provider Design
-
-The product supports two modes:
-
-### Mock/local mode
-
-Default mode for demos, tests, and CI. It is deterministic and requires no external key.
-
-### OpenAI mode
-
-Optional mode for SQL/report generation. Provider outputs are still passed through the SQL safety validator before any execution path. If provider output is malformed or unsafe, the app falls back safely instead of executing untrusted SQL.
-
-## Data Science Details
-
-The included synthetic churn data models realistic patterns:
-
-- Month-to-month contracts have higher churn.
-- Payment failures increase churn likelihood.
-- More support tickets increase churn likelihood.
-- Lower usage increases churn likelihood.
-- Annual and multi-year contracts reduce churn.
-- Enterprise customers have different revenue patterns.
-
-The revenue dataset includes 24 months of customer/revenue dynamics:
-
-- New customers.
-- Active customers.
-- Churned customers.
-- Expansion revenue.
-- Contraction revenue.
-- Marketing spend.
-- Support cost.
-- Total revenue.
-
-## What Is Intentionally Not Included
-
-This is local-first by design. It intentionally does not implement:
-
-- Supabase.
-- Cloud deployment.
-- Vercel, Render, Railway, Fly.io, AWS, GCP, Azure.
-- Kubernetes or Terraform.
-- Billing/payments.
-- Enterprise SSO.
-- Real Slack/Jira/GitHub automation integrations.
-- Web crawling or email ingestion.
-- Production secrets.
-
-Future plans are documented, not implemented:
-
-- [`docs/future-supabase-plan.md`](docs/future-supabase-plan.md)
-- [`docs/future-deployment-plan.md`](docs/future-deployment-plan.md)
+This is a local-first reference product, not a claim of production certification. It intentionally does not include cloud deployment, SSO, billing, Kubernetes/Terraform, a durable distributed job system, or regulatory compliance certification. Model metrics on synthetic demo data do not establish real-world performance. Human approval authorizes query execution; it does not guarantee that a business interpretation is correct.
 
 ## License
 
-MIT License. See [`LICENSE`](LICENSE).
+MIT. See [LICENSE](LICENSE).
